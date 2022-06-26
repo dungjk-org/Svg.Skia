@@ -300,7 +300,7 @@ public sealed class TextDrawable : DrawableBase
         }
     }
 
-    internal void DrawTextBase(SvgTextBase svgTextBase, string? text, float currentX, float currentY, SKRect skViewport, DrawAttributes ignoreAttributes, SKCanvas skCanvas, DrawableBase? until)
+    internal (float posX, float posY) DrawTextBase(SvgTextBase svgTextBase, string? text, float currentX, float currentY, SKRect skViewport, DrawAttributes ignoreAttributes, SKCanvas skCanvas, DrawableBase? until)
     {
         // TODO: Fix SvgTextBase rendering.
         var isValidFill = SvgExtensions.IsValidFill(svgTextBase);
@@ -308,7 +308,7 @@ public sealed class TextDrawable : DrawableBase
 
         if (!isValidFill && !isValidStroke || text is null || string.IsNullOrEmpty(text))
         {
-            return;
+            return (currentX, currentY);
         }
 
         var xs = new List<float>();
@@ -375,6 +375,7 @@ public sealed class TextDrawable : DrawableBase
                     skCanvas.DrawText(textBlob, 0, 0, skPaint);
                 }
             }
+            return (currentX, currentY);
         }
         else
         {
@@ -383,7 +384,10 @@ public sealed class TextDrawable : DrawableBase
             var dx = dxs.Count >= 1 ? dxs[0] : 0f;
             var dy = dys.Count >= 1 ? dys[0] : 0f;
 
-            DrawTextString(svgTextBase, text, x + dx, y + dy, skViewport, ignoreAttributes, skCanvas, until);
+            var posX = x + dx;
+            var posY = y + dy;
+            DrawTextString(svgTextBase, text, posX, posY, skViewport, ignoreAttributes, skCanvas, until);
+            return (posX, posY);
         }
     }
 
@@ -461,22 +465,24 @@ public sealed class TextDrawable : DrawableBase
         EndDraw(skCanvas, ignoreAttributes, maskDrawable, maskDstIn, skPaintOpacity, skPaintFilter, skFilterClip, until);
     }
 
-    internal void DrawTextRef(SvgTextRef svgTextRef, float currentX, float currentY, SKRect skViewport, DrawAttributes ignoreAttributes, bool enableTransform, SKCanvas skCanvas, DrawableBase? until)
+    internal (float posX, float posY) DrawTextRef(SvgTextRef svgTextRef, float currentX, float currentY, SKRect skViewport, DrawAttributes ignoreAttributes, bool enableTransform, SKCanvas skCanvas, DrawableBase? until)
     {
+        var posX = currentX;
+        var posY = currentY;
         if (!CanDraw(svgTextRef, ignoreAttributes) || !HasFeatures(svgTextRef, ignoreAttributes))
         {
-            return;
+            return (posX, posY);
         }
 
         if (SvgExtensions.HasRecursiveReference(svgTextRef, (e) => e.ReferencedElement, new HashSet<Uri>()))
         {
-            return;
+            return (posX, posY);
         }
 
         var svgReferencedText = SvgExtensions.GetReference<SvgText>(svgTextRef, svgTextRef.ReferencedElement);
         if (svgReferencedText is null)
         {
-            return;
+            return (posX, posY);
         }
 
         // TODO: Calculate correct bounds.
@@ -488,17 +494,20 @@ public sealed class TextDrawable : DrawableBase
         if (!string.IsNullOrEmpty(svgReferencedText.Text))
         {
             var text = PrepareText(svgReferencedText, svgReferencedText.Text);
-            DrawTextBase(svgReferencedText, svgReferencedText.Text, currentX, currentY, skViewport, ignoreAttributes, skCanvas, until);
+            (posX, posY) = DrawTextBase(svgReferencedText, svgReferencedText.Text, currentX, currentY, skViewport, ignoreAttributes, skCanvas, until);
         }
 
         EndDraw(skCanvas, ignoreAttributes, maskDrawable, maskDstIn, skPaintOpacity, skPaintFilter, skFilterClip, until);
+        return (posX, posY);
     }
 
-    internal void DrawTextSpan(SvgTextSpan svgTextSpan, float currentX, float currentY, SKRect skViewport, DrawAttributes ignoreAttributes, bool enableTransform, SKCanvas skCanvas, DrawableBase? until)
+    internal (float posX, float posY) DrawTextSpan(SvgTextSpan svgTextSpan, float currentX, float currentY, SKRect skViewport, DrawAttributes ignoreAttributes, bool enableTransform, SKCanvas skCanvas, DrawableBase? until)
     {
+        var posX = currentX;
+        var posY = currentY;
         if (!CanDraw(svgTextSpan, ignoreAttributes) || !HasFeatures(svgTextSpan, ignoreAttributes))
         {
-            return;
+            return (posX, posY);
         }
 
         // TODO: Calculate correct bounds.
@@ -510,10 +519,12 @@ public sealed class TextDrawable : DrawableBase
         if (!string.IsNullOrEmpty(svgTextSpan.Text))
         {
             var text = PrepareText(svgTextSpan, svgTextSpan.Text);
-            DrawTextBase(svgTextSpan, text, currentX, currentY, skViewport, ignoreAttributes, skCanvas, until);
+            (posX, posY) = DrawTextBase(svgTextSpan, text, currentX, currentY, skViewport, ignoreAttributes, skCanvas, until);
         }
 
         EndDraw(skCanvas, ignoreAttributes, maskDrawable, maskDstIn, skPaintOpacity, skPaintFilter, skFilterClip, until);
+
+        return (posX, posY);
     }
 
     internal void DrawText(SvgText svgText, SKRect skViewport, DrawAttributes ignoreAttributes, SKCanvas skCanvas, DrawableBase? until, bool enableTransform)
@@ -547,12 +558,12 @@ public sealed class TextDrawable : DrawableBase
 
         foreach (var node in GetContentNodes(svgText))
         {
-            if (!(node is SvgTextBase textNode))
+            if (node is not SvgTextBase textNode)
             {
                 if (!string.IsNullOrEmpty(node.Content))
                 {
                     var text = PrepareText(svgText, node.Content);
-                    DrawTextBase(svgText, text, 0f, 0f, skViewport, ignoreAttributes, skCanvas, until);
+                    (currentX, currentY) = DrawTextBase(svgText, text, 0f, 0f, skViewport, ignoreAttributes, skCanvas, until);
                 }
             }
             else
@@ -564,11 +575,13 @@ public sealed class TextDrawable : DrawableBase
                         break;
 
                     case SvgTextRef svgTextRef:
-                        DrawTextRef(svgTextRef, currentX, currentY, skViewport, ignoreAttributes, true, skCanvas, until);
+                        (currentX, currentY) = DrawTextRef(svgTextRef, currentX, currentY, skViewport, ignoreAttributes, true, skCanvas, until);
                         break;
 
                     case SvgTextSpan svgTextSpan:
-                        DrawTextSpan(svgTextSpan, currentX, currentY, skViewport, ignoreAttributes, true, skCanvas, until);
+                        {
+                            (currentX, currentY) = DrawTextSpan(svgTextSpan, currentX, currentY, skViewport, ignoreAttributes, true, skCanvas, until);
+                        }
                         break;
                 }
             }
